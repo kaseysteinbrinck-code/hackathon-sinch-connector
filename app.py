@@ -5,7 +5,7 @@ import ast
 import re
 import os
 
-# --- AUTO-CONFIGURATION (The Branding Fix) ---
+# --- AUTO-CONFIGURATION ---
 def setup_branding_config():
     config_dir = ".streamlit"
     config_path = os.path.join(config_dir, "config.toml")
@@ -36,15 +36,10 @@ st.set_page_config(
 # --- CSS STYLING ---
 st.markdown("""
 <style>
-    /* GLOBAL FONT COLORS */
-    h1, h2, h3, .stMarkdown {
-        color: #007171 !important; /* Sinch Dark Green */
-    }
-    
-    /* BUTTON STYLING (Outline Style) */
+    h1, h2, h3, .stMarkdown { color: #007171 !important; }
     [data-testid="stForm"] button {
         background-color: #ffffff !important; 
-        border: 2px solid #ffbe3c !important; /* Sinch Yellow Border */
+        border: 2px solid #ffbe3c !important;
         color: #31333F !important;
         border-radius: 8px !important;
         padding: 10px 20px !important;
@@ -52,7 +47,7 @@ st.markdown("""
         transition: all 0.3s ease !important;
     }
     [data-testid="stForm"] button:hover {
-        background-color: #ffbe3c !important; /* Sinch Yellow Fill */
+        background-color: #ffbe3c !important;
         color: #000000 !important;
         border: 2px solid #ffbe3c !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important;
@@ -61,8 +56,6 @@ st.markdown("""
         background-color: #ffcf6e !important;
         transform: translateY(2px) !important;
     }
-
-    /* COMPACT RESULT CARD */
     .employee-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -71,40 +64,11 @@ st.markdown("""
         padding: 15px;
         margin-bottom: 10px;
     }
-    
-    .emp-header {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        margin-bottom: 5px;
-    }
-    
-    .emp-name {
-        color: #007171;
-        font-size: 1.2rem;
-        font-weight: 800;
-    }
-    
-    .emp-role {
-        color: #666;
-        font-size: 0.95rem;
-        font-weight: 500;
-        font-style: italic;
-    }
-    
-    .emp-bio {
-        color: #333;
-        font-size: 0.9rem;
-        line-height: 1.4;
-        margin-bottom: 8px;
-    }
-    
-    .emp-email a {
-        color: #3aa7ea;
-        text-decoration: none;
-        font-size: 0.85rem;
-        font-weight: bold;
-    }
+    .emp-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+    .emp-name { color: #007171; font-size: 1.2rem; font-weight: 800; }
+    .emp-role { color: #666; font-size: 0.95rem; font-weight: 500; font-style: italic; }
+    .emp-bio { color: #333; font-size: 0.9rem; line-height: 1.4; margin-bottom: 8px; }
+    .emp-email a { color: #3aa7ea; text-decoration: none; font-size: 0.85rem; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -130,16 +94,13 @@ def get_model(api_key):
     except:
         return None
 
-# --- SEARCH LOGIC (Smart Hybrid) ---
+# --- SEARCH LOGIC ---
 def search_logic(df, query, model, department_filter):
-    # 1. Filter
     if department_filter != "All Departments":
         df = df[df['Department'] == department_filter]
     
     if df.empty: return [], "No matches in this department."
 
-    # 2. Code Search (Instant)
-    # Aggressive Stop Words to remove "Corporate Noise"
     stop_words = {
         'who', 'can', 'help', 'with', 'questions', 'about', 'find', 'me', 'a', 'an', 'the', 
         'i', 'have', 'question', 'whether', 'sinch', 'offers', 'solution', 'solutions', 
@@ -154,23 +115,20 @@ def search_logic(df, query, model, department_filter):
     df['score'] = 0
     for kw in keywords:
         pattern = r'\b' + re.escape(kw) + r'\b'
-        # UPDATED SCORING WEIGHTS per your request
         df['score'] += df['Job Title'].str.contains(pattern, case=False, regex=True).astype(int) * 10
         df['score'] += df['Skills'].str.contains(pattern, case=False, regex=True).astype(int) * 10
         df['score'] += df['Expertise'].str.contains(pattern, case=False, regex=True).astype(int) * 5
         df['score'] += df['Bio'].str.contains(pattern, case=False, regex=True).astype(int) * 3
 
-    # Send top 40 to AI to ensure we catch the relevant people
     top_candidates = df[df['score'] > 0].sort_values('score', ascending=False).head(40)
     
     if top_candidates.empty: return [], "No direct keyword matches found."
 
-    # 3. AI Re-ranking
     if model and len(top_candidates) > 3:
         try:
             prompt = f"""
             Act as a recruiter. Select the top 3-5 candidates from this list who best match the user's intent: "{query}".
-            If specific technical terms (like HIPAA, Python, Marketo) are used, PRIORITIZE candidates who have those exact skills over generalists.
+            If specific technical terms are used, PRIORITIZE candidates who have those exact skills.
             Return ONLY a Python list of indices (e.g. [5, 12]).
             List:
             {top_candidates[['Name', 'Job Title', 'Bio', 'Skills']].to_csv()}
@@ -186,11 +144,26 @@ def search_logic(df, query, model, department_filter):
 
 # --- UI LAYOUT ---
 
+# Sidebar with Smart Secrets Logic
 with st.sidebar:
     st.header("⚙️ Config")
-    api_key = st.text_input("Google AI API Key", type="password")
+    
+    # CHECK FOR SECRET KEY FIRST
+    # This try/except block handles both Local (file missing) and Cloud (key missing) cases gracefully.
+    try:
+        if "GOOGLE_API_KEY" in st.secrets:
+            api_key = st.secrets["GOOGLE_API_KEY"]
+            st.success("✅ Authentication: Cloud Secret Loaded")
+        else:
+            # If running locally without a secrets file, show the box
+            api_key = st.text_input("Google AI API Key", type="password")
+            st.caption("Enter your key manually.")
+    except (FileNotFoundError, KeyError):
+        # Fallback for local runs
+        api_key = st.text_input("Google AI API Key", type="password")
+        st.caption("Enter your key manually.")
+
     st.markdown("---")
-    st.caption("Without a key, the tool uses Keyword Match only.")
 
 # Header
 left_co, cent_co, last_co = st.columns([3, 2, 3])
@@ -208,7 +181,6 @@ df = load_data('sinch_directory.xlsx')
 
 if df is not None:
     departments = ["All Departments"] + sorted(df['Department'].unique().tolist())
-    
     dept_filter = st.selectbox("Filter by Department:", departments)
     
     with st.form(key='search_form'):
